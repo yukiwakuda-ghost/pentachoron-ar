@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>Pentachoron AR — 正五胞体射影</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ===== 起動画面 ===== -->
+<div id="screen-intro" class="screen active">
+  <div class="intro-inner">
+    <h1>Pentachoron<br><span>AR Projection</span></h1>
+    <p class="lead">正五胞体（4次元・5-cell）が<br>この3次元空間に射影する瞬間を捉えます。</p>
+    <div class="mode-select">
+      <p class="mode-label">レンダリングモード</p>
+      <button class="mode-btn active" data-mode="realtime">
+        <strong>リアルタイム反射</strong>
+        <span>キューブマップ動的更新／即時表示</span>
+      </button>
+      <button class="mode-btn" data-mode="composite">
+        <strong>録画後合成</strong>
+        <span>15秒撮影→高品質後処理で仕上げ</span>
+      </button>
+    </div>
+    <button id="btn-start" class="primary-btn">開始する</button>
+    <p class="note">※ HTTPS 環境が必須です。iOSではカメラとモーションセンサーの許可が必要です。</p>
+  </div>
+</div>
+
+<!-- ===== モーションセンサー同意画面 ===== -->
+<div id="screen-motion" class="screen">
+  <div class="permission-inner">
+    <div class="perm-icon">📱</div>
+    <h2>モーションセンサー</h2>
+    <p>デバイスの向きに合わせて正五胞体の射影方向を計算するため、モーションセンサーへのアクセスを許可してください。</p>
+    <button id="btn-motion" class="primary-btn">許可する</button>
+    <button id="btn-motion-skip" class="secondary-btn">スキップ</button>
+  </div>
+</div>
+
+<!-- ===== カメラ同意画面 ===== -->
+<div id="screen-camera" class="screen">
+  <div class="permission-inner">
+    <div class="perm-icon">📷</div>
+    <h2>カメラアクセス</h2>
+    <p>周辺環境を背景として合成し、環境光を光源に反射させます。カメラの使用を許可してください。</p>
+    <button id="btn-camera" class="primary-btn">カメラを起動</button>
+  </div>
+</div>
+
+<!-- ===== 撮影/AR画面 ===== -->
+<div id="screen-ar" class="screen">
+  <video id="camera-video" playsinline autoplay muted></video>
+  <canvas id="three-canvas"></canvas>
+
+  <div class="hud-top">
+    <div id="hud-mode">MODE: REALTIME</div>
+    <div id="hud-fps">-- fps</div>
+  </div>
+
+  <div class="hud-bottom">
+    <div id="hud-timer">00:00 / 00:15</div>
+    <button id="btn-record" class="record-btn"><span></span></button>
+    <button id="btn-back" class="back-btn">✕</button>
+  </div>
+
+  <div id="composite-progress" class="composite-progress">
+    <div class="cp-inner">
+      <div class="cp-spinner"></div>
+      <p>合成中... <span id="cp-percent">0</span>%</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 結果画面 ===== -->
+<div id="screen-result" class="screen">
+  <div class="result-inner">
+    <h2>完成しました</h2>
+    <video id="result-video" playsinline controls></video>
+    <a id="btn-download" class="primary-btn" download="pentachoron_ar.webm">動画を保存</a>
+    <button id="btn-again" class="secondary-btn">もう一度撮影</button>
+  </div>
+</div>
+
+<!-- ===== エラー画面 ===== -->
+<div id="screen-error" class="screen">
+  <div class="permission-inner">
+    <div class="perm-icon">⚠️</div>
+    <h2>エラー</h2>
+    <p id="error-message">エラーが発生しました。</p>
+    <button id="btn-retry" class="primary-btn">やり直す</button>
+  </div>
+</div>
+
+<!-- Three.js (importmap for module resolution on GH Pages) -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
