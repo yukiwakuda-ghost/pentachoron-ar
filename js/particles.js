@@ -1,26 +1,24 @@
 import * as THREE from 'three';
 
 /**
- * 空間に散る正四面体（Tetrahedron）の光粒 & 松葉状スパーク（線香花火の散華）
+ * 線香花火の松葉散華 & 網膜残像（Afterimage）パーティクル
  */
 export class SparkleParticles {
-  constructor(maxCount = 1000) {
+  constructor(maxCount = 800) {
     this.maxCount = maxCount;
     this.particles = [];
 
     const geo = new THREE.BufferGeometry();
     this.positions = new Float32Array(maxCount * 3);
     this.colors = new Float32Array(maxCount * 3);
-    this.sizes = new Float32Array(maxCount);
 
     geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
-    geo.setAttribute('size', new THREE.BufferAttribute(this.sizes, 1));
 
     const sparkTex = new THREE.CanvasTexture(this.createSparkCanvas());
 
     this.material = new THREE.PointsMaterial({
-      size: 0.12,
+      size: 0.14,
       map: sparkTex,
       vertexColors: true,
       transparent: true,
@@ -45,14 +43,13 @@ export class SparkleParticles {
     const c = document.createElement('canvas');
     c.width = 32; c.height = 32;
     const ctx = c.getContext('2d');
-    // 正四面体のシャープな結晶状ファセット光
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(16, 2);
-    ctx.lineTo(28, 26);
-    ctx.lineTo(4, 26);
-    ctx.closePath();
-    ctx.fill();
+    const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 15);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.3, '#fffbf0');
+    g.addColorStop(0.7, 'rgba(0, 229, 255, 0.35)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 32, 32);
     return c;
   }
 
@@ -63,10 +60,10 @@ export class SparkleParticles {
         p.alive = true;
         p.pos.copy(pos);
 
-        // 松葉のように鋭角に弾け飛ぶ速度ベクトル
+        // 線香花火特有の鋭い線状放射（ランダムな方向へ弾け飛ぶ）
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.acos(Math.random() * 2 - 1);
-        const spd = 0.3 + Math.random() * 1.4;
+        const spd = 0.3 + Math.random() * 1.5;
 
         p.vel.set(
           Math.sin(phi) * Math.cos(theta),
@@ -81,15 +78,17 @@ export class SparkleParticles {
     }
   }
 
-  update(dt, vertices) {
-    if (vertices) {
-      vertices.forEach(v => {
-        if (Math.random() < 0.4) this.spawn(v);
+  update(dt, origins) {
+    if (origins && origins.length > 0) {
+      origins.forEach(pos => {
+        if (Math.random() < 0.45) {
+          this.spawn(pos);
+        }
       });
     }
 
-    const pos = this.points.geometry.attributes.position.array;
-    const col = this.points.geometry.attributes.color.array;
+    const posArr = this.points.geometry.attributes.position.array;
+    const colArr = this.points.geometry.attributes.color.array;
 
     for (let i = 0; i < this.maxCount; i++) {
       const p = this.particles[i];
@@ -99,29 +98,33 @@ export class SparkleParticles {
         p.life += dt;
         if (p.life >= p.maxLife) {
           p.alive = false;
-          pos[i3] = 9999;
+          posArr[i3] = 9999;
           continue;
         }
 
-        p.vel.multiplyScalar(Math.pow(0.15, dt));
-        p.vel.y -= 0.25 * dt; // 微小な重力沈降
+        p.vel.multiplyScalar(Math.pow(0.18, dt));
+        p.vel.y -= 0.25 * dt;
         p.pos.addScaledVector(p.vel, dt);
 
-        pos[i3] = p.pos.x; pos[i3 + 1] = p.pos.y; pos[i3 + 2] = p.pos.z;
+        posArr[i3] = p.pos.x;
+        posArr[i3 + 1] = p.pos.y;
+        posArr[i3 + 2] = p.pos.z;
 
-        // 網膜残像（消失直前に一瞬だけ淡いシアンの補色が浮かぶ）
+        // 網膜残像：白熱（0.0〜0.4）→ 補色シアン（0.4〜1.0）
         const progress = p.life / p.maxLife;
         if (progress < 0.4) {
-          col[i3] = 1.0; col[i3 + 1] = 0.98; col[i3 + 2] = 0.95; // 白熱
+          colArr[i3] = 1.0;
+          colArr[i3 + 1] = 0.98;
+          colArr[i3 + 2] = 0.92;
         } else {
           const fade = (progress - 0.4) / 0.6;
           const a = 1.0 - fade;
-          col[i3] = (0.05) * a;
-          col[i3 + 1] = (0.85) * a;
-          col[i3 + 2] = (1.0) * a; // 補色シアン
+          colArr[i3] = (0.05) * a;
+          colArr[i3 + 1] = (0.85) * a;
+          colArr[i3 + 2] = (1.0) * a; // 補色シアン
         }
       } else {
-        pos[i3] = 9999;
+        posArr[i3] = 9999;
       }
     }
 

@@ -1,17 +1,16 @@
 import { ARScene } from './scene.js';
 import { MotionTracker } from './motion.js';
-import { OfflineCompositor } from './compositor.js';
+import { StreamRecorder } from './recorder.js';
 
 class App {
   constructor() {
     this.videoElem = document.getElementById('camera-video');
     this.canvasElem = document.getElementById('three-canvas');
+
     this.scene = null;
     this.motion = new MotionTracker();
+    this.recorder = null;
     this.stream = null;
-    this.isRecording = false;
-    this.recordedFrames = [];
-    this.recordDuration = 15; // 15秒間
 
     this.initUI();
   }
@@ -55,13 +54,10 @@ class App {
     document.getElementById('btn-retry').onclick = () => {
       this.showScreen('screen-intro');
     };
-
-    this.setupRecordHandler();
   }
 
   async startAR() {
     try {
-      // iPhone 17e 最適化: 1080p 60fps バックカメラ
       const constraints = {
         audio: false,
         video: {
@@ -80,92 +76,61 @@ class App {
 
       this.showScreen('screen-ar');
 
-      // 3D空間シーンの初期化
       if (!this.scene) {
         this.scene = new ARScene(this.canvasElem, this.videoElem);
       }
       this.scene.start();
 
-      // ワールド空間固定のためのジャイロ追従
       this.motion.start((quaternion) => {
         if (this.scene) this.scene.updateCameraPose(quaternion);
       });
 
+      this.setupRecorder();
+
     } catch (err) {
       console.error(err);
       document.getElementById('error-message').textContent =
-        'カメラの起動に失敗しました。Safariの設定でカメラを許可してください。';
+        'カメラの起動に失敗しました。Safariの設定でカメラのアクセスを許可してください。';
       this.showScreen('screen-error');
     }
   }
 
-  setupRecordHandler() {
+  setupRecorder() {
+    this.recorder = new StreamRecorder(this.videoElem, this.canvasElem);
     const recordBtn = document.getElementById('btn-record');
     const timerElem = document.getElementById('hud-timer');
     const cpElem = document.getElementById('composite-progress');
-    const cpBar = document.getElementById('cp-bar');
-    const cpPercent = document.getElementById('cp-percent');
-    const cpStatus = document.getElementById('cp-status-text');
 
-    recordBtn.onclick = async () => {
-      if (this.isRecording) return;
-      this.isRecording = true;
+    // ボタンのクリックで録画の開始／途中停止を制御
+    recordBtn.onclick = () => {
+      if (this.recorder.isRecording) {
+        // 手動での停止
+        this.recorder.stop();
+        return;
+      }
+
       recordBtn.classList.add('recording');
-      this.recordedFrames = [];
 
-      // 15秒間、カメラフレームと3D状態を同期キャプチャ
-      const fps = 30; // 合成用フレームレート
-      const totalFrames = this.recordDuration * fps;
-      const intervalMs = 1000 / fps;
-      let frameCount = 0;
-
-      const captureTimer = setInterval(() => {
-        frameCount++;
-        const elapsed = (frameCount / fps);
-        const cur = String(Math.floor(elapsed)).padStart(2, '0');
-        timerElem.textContent = `00:${cur} / 00:15`;
-
-        // フレームデータ（ビデオビットマップ + 空間パラメータ）をストック
-        const frameData = this.scene.captureFrameSnapshot();
-        this.recordedFrames.push(frameData);
-
-        if (frameCount >= totalFrames) {
-          clearInterval(captureTimer);
-          this.isRecording = false;
+      this.recorder.start(
+        // プログレス
+        (timeSec, totalSec) => {
+          const cur = String(Math.floor(timeSec)).padStart(2, '0');
+          const max = String(totalSec).padStart(2, '0');
+          timerElem.textContent = `00:${cur} / 00:${max}`;
+        },
+        // 完了
+        async (videoBlob, videoUrl) => {
           recordBtn.classList.remove('recording');
           timerElem.textContent = '00:00 / 00:15';
 
-          // オフライン超高品位コンポジット開始
-          this.runOfflineComposite();
+          cpElem.classList.add('active');
+          await new Promise(r => setTimeout(r, 600));
+          cpElem.classList.remove('active');
+
+          this.showResult(videoBlob, videoUrl);
         }
-      }, intervalMs);
+      );
     };
-  }
-
-  async runOfflineComposite() {
-    const cpElem = document.getElementById('composite-progress');
-    const cpBar = document.getElementById('cp-bar');
-    const cpPercent = document.getElementById('cp-percent');
-    const cpStatus = document.getElementById('cp-status-text');
-
-    cpElem.classList.add('active');
-    cpBar.style.width = '0%';
-    cpPercent.textContent = '0';
-
-    const compositor = new OfflineCompositor(this.scene);
-
-    const { videoBlob, videoUrl } = await compositor.renderHighQualityVideo(
-      this.recordedFrames,
-      (progress, statusText) => {
-        const pct = Math.floor(progress * 100);
-        cpBar.style.width = `${pct}%`;
-        cpPercent.textContent = pct;
-        if (statusText) cpStatus.textContent = statusText;
-      }
-    );
-
-    cpElem.classList.remove('active');
-    this.showResult(videoBlob, videoUrl);
   }
 
   showResult(blob, url) {
@@ -178,7 +143,7 @@ class App {
     const downloadBtn = document.getElementById('btn-download');
     downloadBtn.onclick = async () => {
       const isMp4 = blob.type.includes('mp4');
-      const filename = `pentachoron_4d_${Date.now()}.${isMp4 ? 'mp4' : 'webm'}`;
+      const filename = `pentachoron_${Date.now()}.${isMp4 ? 'mp4' : 'webm'}`;
       const file = new File([blob], filename, { type: blob.type });
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -186,7 +151,7 @@ class App {
           await navigator.share({
             files: [file],
             title: 'Pentachoron 4D AR',
-            text: '4次元正五胞体の空間射影と光線反射'
+            text: '正五胞体の空間射影'
           });
           return;
         } catch (e) {
@@ -194,6 +159,7 @@ class App {
         }
       }
 
+      // フォールバックダウンロード
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
@@ -202,7 +168,9 @@ class App {
   }
 
   stopAR() {
-    this.isRecording = false;
+    if (this.recorder && this.recorder.isRecording) {
+      this.recorder.stop();
+    }
     this.scene?.stop();
     this.motion.stop();
     this.stream?.getTracks().forEach(t => t.stop());
