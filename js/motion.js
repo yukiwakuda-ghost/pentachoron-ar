@@ -1,13 +1,10 @@
 import * as THREE from 'three';
 
-/**
- * デバイスの姿勢センサー（DeviceOrientation）管理
- */
 export class MotionTracker {
   constructor() {
     this.active = false;
     this.callback = null;
-    this.orientationHandler = this.onOrientation.bind(this);
+    this.handler = this.onOrientation.bind(this);
     this.euler = new THREE.Euler();
     this.quaternion = new THREE.Quaternion();
   }
@@ -23,7 +20,6 @@ export class MotionTracker {
         const res = await DeviceMotionEvent.requestPermission();
         return res === 'granted';
       } catch (e) {
-        console.warn('Motion permission rejected:', e);
         return false;
       }
     }
@@ -32,26 +28,23 @@ export class MotionTracker {
 
   start(callback) {
     this.callback = callback;
-    window.addEventListener('deviceorientation', this.orientationHandler, false);
+    window.addEventListener('deviceorientation', this.handler, false);
     this.active = true;
   }
 
   stop() {
     this.active = false;
-    window.removeEventListener('deviceorientation', this.orientationHandler, false);
+    window.removeEventListener('deviceorientation', this.handler, false);
   }
 
-  onOrientation(event) {
+  onOrientation(e) {
     if (!this.active || !this.callback) return;
+    const a = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
+    const b = e.beta  ? THREE.MathUtils.degToRad(e.beta)  : 0;
+    const g = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
 
-    const alpha = event.alpha ? THREE.MathUtils.degToRad(event.alpha) : 0;
-    const beta  = event.beta  ? THREE.MathUtils.degToRad(event.beta)  : 0;
-    const gamma = event.gamma ? THREE.MathUtils.degToRad(event.gamma) : 0;
-
-    // YXZ順でオイラー角をクォータニオンに変換
-    this.euler.set(beta, alpha, -gamma, 'YXZ');
+    this.euler.set(b, a, -g, 'YXZ');
     this.quaternion.setFromEuler(this.euler);
-
-    this.callback(this.quaternion, this.euler);
+    this.callback(this.quaternion);
   }
 }

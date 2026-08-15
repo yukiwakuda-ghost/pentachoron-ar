@@ -1,15 +1,10 @@
 import * as THREE from 'three';
 
 /**
- * 線香花火の松葉散華 & 網膜残像（Afterimage）パーティクル
- * 
- * 生理的光学現象の再現：
- * 1. 弾けた瞬間: 鋭い白金色（#FFFFFF, #FFF0D0）の微細な光芒
- * 2. 減衰時: エネルギーを失うと同時に、ヒトの網膜の受容体疲労による
- *    補色の残像（淡いコバルトシアン / インディゴ: #00E5FF, #2B44FF）が一瞬浮かび上がって消える。
+ * 空間に散る正四面体（Tetrahedron）の光粒 & 松葉状スパーク（線香花火の散華）
  */
 export class SparkleParticles {
-  constructor(maxCount = 900) {
+  constructor(maxCount = 1000) {
     this.maxCount = maxCount;
     this.particles = [];
 
@@ -22,11 +17,10 @@ export class SparkleParticles {
     geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
     geo.setAttribute('size', new THREE.BufferAttribute(this.sizes, 1));
 
-    // 高解像度松葉スパークテクスチャ
     const sparkTex = new THREE.CanvasTexture(this.createSparkCanvas());
 
     this.material = new THREE.PointsMaterial({
-      size: 0.18,
+      size: 0.12,
       map: sparkTex,
       vertexColors: true,
       transparent: true,
@@ -36,76 +30,66 @@ export class SparkleParticles {
 
     this.points = new THREE.Points(geo, this.material);
 
-    // プール初期化
     for (let i = 0; i < maxCount; i++) {
       this.particles.push({
         alive: false,
         pos: new THREE.Vector3(),
         vel: new THREE.Vector3(),
         life: 0,
-        maxLife: 1.0,
-        baseSize: 0.1
+        maxLife: 0.5
       });
     }
   }
 
   createSparkCanvas() {
     const c = document.createElement('canvas');
-    c.width = 32;
-    c.height = 32;
+    c.width = 32; c.height = 32;
     const ctx = c.getContext('2d');
-    const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 15);
-    g.addColorStop(0, 'rgba(255, 255, 255, 1)');
-    g.addColorStop(0.3, 'rgba(255, 255, 255, 0.7)');
-    g.addColorStop(0.7, 'rgba(77, 226, 255, 0.25)');
-    g.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, 32, 32);
+    // 正四面体のシャープな結晶状ファセット光
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(16, 2);
+    ctx.lineTo(28, 26);
+    ctx.lineTo(4, 26);
+    ctx.closePath();
+    ctx.fill();
     return c;
   }
 
-  spawn(origin, count = 3) {
-    let spawned = 0;
+  spawn(pos) {
     for (let i = 0; i < this.maxCount; i++) {
       const p = this.particles[i];
       if (!p.alive) {
         p.alive = true;
-        p.pos.copy(origin.pos);
-        
-        // 線香花火特有の鋭い線状放射（ランダムな方向へ弾け飛ぶ）
+        p.pos.copy(pos);
+
+        // 松葉のように鋭角に弾け飛ぶ速度ベクトル
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.acos(Math.random() * 2 - 1);
-        const speed = 0.4 + Math.random() * 1.6;
-        
+        const spd = 0.3 + Math.random() * 1.4;
+
         p.vel.set(
           Math.sin(phi) * Math.cos(theta),
           Math.sin(phi) * Math.sin(theta),
           Math.cos(phi)
-        ).multiplyScalar(speed);
+        ).multiplyScalar(spd);
 
         p.life = 0;
-        p.maxLife = 0.35 + Math.random() * 0.55; // 0.35〜0.9秒の刹那的な寿命
-        p.baseSize = 0.08 + Math.random() * 0.14;
-
-        spawned++;
-        if (spawned >= count) break;
+        p.maxLife = 0.3 + Math.random() * 0.45;
+        break;
       }
     }
   }
 
-  update(dt, vertices3D) {
-    // 頂点から確率的に線香花火の火花を射出
-    if (vertices3D && vertices3D.length > 0) {
-      for (const v of vertices3D) {
-        if (Math.random() < 0.65) {
-          this.spawn(v, 2);
-        }
-      }
+  update(dt, vertices) {
+    if (vertices) {
+      vertices.forEach(v => {
+        if (Math.random() < 0.4) this.spawn(v);
+      });
     }
 
-    let activeCount = 0;
-    const posArr = this.points.geometry.attributes.position.array;
-    const colArr = this.points.geometry.attributes.color.array;
+    const pos = this.points.geometry.attributes.position.array;
+    const col = this.points.geometry.attributes.color.array;
 
     for (let i = 0; i < this.maxCount; i++) {
       const p = this.particles[i];
@@ -115,44 +99,29 @@ export class SparkleParticles {
         p.life += dt;
         if (p.life >= p.maxLife) {
           p.alive = false;
-          posArr[i3] = 9999; // 画面外
+          pos[i3] = 9999;
           continue;
         }
 
-        // 速度減衰（空気抵抗）+ わずかな重力
-        p.vel.multiplyScalar(Math.pow(0.2, dt));
-        p.vel.y -= 0.3 * dt;
+        p.vel.multiplyScalar(Math.pow(0.15, dt));
+        p.vel.y -= 0.25 * dt; // 微小な重力沈降
         p.pos.addScaledVector(p.vel, dt);
 
-        posArr[i3] = p.pos.x;
-        posArr[i3 + 1] = p.pos.y;
-        posArr[i3 + 2] = p.pos.z;
+        pos[i3] = p.pos.x; pos[i3 + 1] = p.pos.y; pos[i3 + 2] = p.pos.z;
 
-        // 生理的色相変化：白熱光 → 補色シアン残像
-        const progress = p.life / p.maxLife; // 0.0 -> 1.0
-
-        let r, g, b;
-        if (progress < 0.35) {
-          // 初期段階: 灼熱の白金色
-          r = 1.0;
-          g = 0.98;
-          b = 0.92;
+        // 網膜残像（消失直前に一瞬だけ淡いシアンの補色が浮かぶ）
+        const progress = p.life / p.maxLife;
+        if (progress < 0.4) {
+          col[i3] = 1.0; col[i3 + 1] = 0.98; col[i3 + 2] = 0.95; // 白熱
         } else {
-          // 減衰・消失段階: 補色アフターイメージ（網膜残像シアン・インディゴ）
-          const fade = (progress - 0.35) / 0.65;
-          const alpha = 1.0 - fade;
-          r = THREE.MathUtils.lerp(1.0, 0.05, fade) * alpha;
-          g = THREE.MathUtils.lerp(0.98, 0.75, fade) * alpha;
-          b = THREE.MathUtils.lerp(0.92, 1.0, fade) * alpha;
+          const fade = (progress - 0.4) / 0.6;
+          const a = 1.0 - fade;
+          col[i3] = (0.05) * a;
+          col[i3 + 1] = (0.85) * a;
+          col[i3 + 2] = (1.0) * a; // 補色シアン
         }
-
-        colArr[i3] = r;
-        colArr[i3 + 1] = g;
-        colArr[i3 + 2] = b;
-
-        activeCount++;
       } else {
-        posArr[i3] = 9999;
+        pos[i3] = 9999;
       }
     }
 

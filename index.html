@@ -6,89 +6,101 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#000000">
-<title>Pentachoron AR — 正五胞体射影</title>
+<title>Pentachoron AR — 4D Projection Installation</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-<!-- ===== 起動画面 ===== -->
+<!-- 1. 起動画面 -->
 <div id="screen-intro" class="screen active">
   <div class="intro-inner">
-    <div class="art-mark">◇ 4D PROJECTION ◇</div>
+    <div class="curator-badge">MUSEUM INSTALLATION / WEBAR</div>
     <h1>Pentachoron<br><span>正五胞体 空間射影</span></h1>
-    <p class="lead">4次元正多胞体（5-cell）が3次元空間に織りなす幾何学の閃光。<br>線香花火の松葉のように散る火花と、網膜に残る補色の残像。</p>
-    
-    <button id="btn-start" class="primary-btn">鑑賞を開始する</button>
-    <p class="note">※ iOS Safari でカメラおよびジャイロセンサーを有効化します。</p>
+    <p class="lead">
+      4次元の正多胞体がこの3次元空間と交差する瞬間。<br>
+      線香花火のような極細の白光、瞬く正四面体の面、<br>
+      現実の空間を満たす光のバウンスを15秒の映像に定着させます。
+    </p>
+    <button id="btn-start" class="primary-btn">鑑賞プロセスを開始</button>
   </div>
 </div>
 
-<!-- ===== モーションセンサー同意画面 ===== -->
+<!-- 2. モーションセンサー同意 -->
 <div id="screen-motion" class="screen">
   <div class="permission-inner">
-    <div class="perm-icon">◎</div>
-    <h2>空間知覚センサー</h2>
-    <p>視点とデバイスの姿勢に連動して4次元射影角をリアルタイム計算します。モーションセンサーへのアクセスを許可してください。</p>
-    <button id="btn-motion" class="primary-btn">センサーを許可</button>
+    <div class="perm-icon">🧭</div>
+    <h2>空間知覚センサーの同期</h2>
+    <p>端末のジャイロスコープと同期し、4次元多胞体を現実の3次元座標空間に固定・浮遊させます。</p>
+    <button id="btn-motion" class="primary-btn">センサーを同期する</button>
     <button id="btn-motion-skip" class="secondary-btn">スキップ</button>
   </div>
 </div>
 
-<!-- ===== カメラ同意画面 ===== -->
+<!-- 3. カメラ同意 -->
 <div id="screen-camera" class="screen">
   <div class="permission-inner">
     <div class="perm-icon">📷</div>
-    <h2>空間カメラ</h2>
-    <p>現実空間に4次元光芒を重畳描画します。カメラへのアクセスを許可してください。</p>
+    <h2>現実空間キャプチャ</h2>
+    <p>周囲の壁や床を撮影し、多胞体の発光が現実の部屋に反射するライティング処理を行います。</p>
     <button id="btn-camera" class="primary-btn">カメラを起動</button>
   </div>
 </div>
 
-<!-- ===== AR空間画面 ===== -->
+<!-- 4. AR空間・撮影画面 -->
 <div id="screen-ar" class="screen">
   <video id="camera-video" playsinline webkit-playsinline autoplay muted></video>
   <canvas id="three-canvas"></canvas>
 
   <div class="hud-top">
-    <div id="hud-mode">4D: S³→ℝ³ PROJECTION</div>
+    <div id="hud-status">● 4D CROSS-SECTION ACTIVE</div>
     <div id="hud-fps">60 fps</div>
+  </div>
+
+  <div class="hud-center-hint" id="hud-hint">
+    カメラをゆっくり動かして周囲の空間を捉えてください
   </div>
 
   <div class="hud-bottom">
     <div id="hud-timer">00:00 / 00:15</div>
-    <button id="btn-record" class="record-btn" aria-label="録画"><span></span></button>
-    <button id="btn-back" class="back-btn" aria-label="戻る">✕</button>
+    <button id="btn-record" class="record-btn" aria-label="15秒記録開始"><span></span></button>
+    <button id="btn-back" class="back-btn">✕</button>
   </div>
 
+  <!-- 高精度オフラインレンダリング プログレスオーバーレイ -->
   <div id="composite-progress" class="composite-progress">
     <div class="cp-inner">
       <div class="cp-spinner"></div>
-      <p>高精度エンコード中... <span id="cp-percent">0</span>%</p>
+      <h3>空間光線・反射レンダリング中</h3>
+      <p id="cp-status-text">フレームバウンス光を計算しています...</p>
+      <div class="progress-bar-bg">
+        <div id="cp-bar" class="progress-bar-fill"></div>
+      </div>
+      <div class="cp-percent-text"><span id="cp-percent">0</span>%</div>
+      <p class="cp-sub">※高精度合成のため少し時間がかかります</p>
     </div>
   </div>
 </div>
 
-<!-- ===== 結果・保存画面 ===== -->
+<!-- 5. 結果・出力画面 -->
 <div id="screen-result" class="screen">
   <div class="result-inner">
-    <h2>映像の生成完了</h2>
-    <video id="result-video" playsinline webkit-playsinline controls></video>
+    <h2>4D PROJECTION CAPTURED</h2>
+    <video id="result-video" playsinline webkit-playsinline loop controls></video>
     <button id="btn-download" class="primary-btn">写真アプリ / 端末に保存</button>
     <button id="btn-again" class="secondary-btn">もう一度体験する</button>
   </div>
 </div>
 
-<!-- ===== エラー画面 ===== -->
+<!-- 6. エラー画面 -->
 <div id="screen-error" class="screen">
   <div class="permission-inner">
     <div class="perm-icon">⚠️</div>
-    <h2>通信・権限エラー</h2>
+    <h2>エラー</h2>
     <p id="error-message">エラーが発生しました。</p>
     <button id="btn-retry" class="primary-btn">やり直す</button>
   </div>
 </div>
 
-<!-- Three.js Module Map -->
 <script type="importmap">
 {
   "imports": {
@@ -96,7 +108,6 @@
   }
 }
 </script>
-
 <script type="module" src="js/app.js"></script>
 </body>
 </html>
