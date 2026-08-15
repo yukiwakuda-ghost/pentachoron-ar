@@ -1,204 +1,188 @@
-// pentachoron.js - 4D正五胞体（5-cell）の生成と3D射影
-// 5個の4次元頂点から辺・面・三角パーティクルを構築し、
-// 4D回転→透視射影で3D座標に落とし込む。
-
 import * as THREE from 'three';
 
-// 4次元正五胞体（5-cell / regular simplex）の5頂点。
-// R^5内で標準基底 e_i を頂点とし、重心が原点になるように平行移動、
-// さらに 4D超平面 (sum=0) 上の直交基底に投影することで、
-// すべての辺長が等しい正5胞体を R^4 上で厳密に構成する。
-export function pentachoronVertices4D() {
-  // e_i - (1/5, 1/5, 1/5, 1/5, 1/5)
-  const raw = [];
-  for (let i = 0; i < 5; i++) {
-    const v = [-0.2, -0.2, -0.2, -0.2, -0.2];
-    v[i] += 1.0;
-    raw.push(v);
-  }
-  // 平面 sum(x)=0 の正規直交基底 B (5x4行列)。Gram-Schmidtで取得。
-  const basis5 = [];
-  const seeds = [
-    [1, -1, 0, 0, 0],
-    [1, 1, -2, 0, 0],
-    [1, 1, 1, -3, 0],
-    [1, 1, 1, 1, -4]
-  ];
-  for (const s of seeds) {
-    const n = Math.hypot(...s);
-    basis5.push(s.map(x => x / n));
-  }
-  // 各頂点を 4基底に投影 → R^4 座標
-  const out = raw.map(v => basis5.map(b => {
-    let d = 0;
-    for (let i = 0; i < 5; i++) d += v[i] * b[i];
-    return d;
-  }));
-  return out;
-}
-
-// 5C2 = 10本の辺（すべての頂点ペア）
-export function pentachoronEdges() {
-  const edges = [];
-  for (let i = 0; i < 5; i++)
-    for (let j = i+1; j < 5; j++)
-      edges.push([i, j]);
-  return edges;
-}
-
-// 5C3 = 10個の三角面
-export function pentachoronFaces() {
-  const faces = [];
-  for (let i = 0; i < 5; i++)
-    for (let j = i+1; j < 5; j++)
-      for (let k = j+1; k < 5; k++)
-        faces.push([i, j, k]);
-  return faces;
-}
-
-// 4D→3D 透視射影（w軸方向）
-export function project4Dto3D(v4, camW = 2.5) {
-  const [x, y, z, w] = v4;
-  const k = 1.0 / (camW - w);
-  return new THREE.Vector3(x * k, y * k, z * k);
-}
-
-// 4D回転行列（XW面 / YW面 / ZW面での回転を合成）
-// これにより「4次元での回転」が3D投影上でグニャリと変形する動きになる
-export function rotate4D(v, aXW, aYW, aZW, aXY = 0) {
-  let [x, y, z, w] = v;
-  // XW
-  let c = Math.cos(aXW), s = Math.sin(aXW);
-  [x, w] = [c*x - s*w, s*x + c*w];
-  // YW
-  c = Math.cos(aYW); s = Math.sin(aYW);
-  [y, w] = [c*y - s*w, s*y + c*w];
-  // ZW
-  c = Math.cos(aZW); s = Math.sin(aZW);
-  [z, w] = [c*z - s*w, s*z + c*w];
-  // XY (通常の3D回転成分も少しだけ)
-  c = Math.cos(aXY); s = Math.sin(aXY);
-  [x, y] = [c*x - s*y, s*x + c*y];
-  return [x, y, z, w];
-}
-
 /**
- * Pentachoron メインオブジェクト
- *  - 10本のエッジをTubeGeometryで発光ラインとして描画
- *  - 10個の面を薄く明滅する半透明パネルとして描画
- *  - 5頂点を光の粒として描画
+ * 4次元正五胞体（5-cell / Pentachoron）
+ * 5頂点、10本のエッジ、10面、5胞で構成される4次元単体。
+ * 4次元空間での二重回転（Double Rotation）と、線香花火のような白光の極細フィラメントを描画。
  */
 export class Pentachoron {
-  constructor(scale = 0.6) {
-    this.scale = scale;
-    this.baseVerts = pentachoronVertices4D();
-    this.edges = pentachoronEdges();
-    this.faces = pentachoronFaces();
-
+  constructor() {
     this.group = new THREE.Group();
-    this.time = 0;
 
-    // === Edges: 発光ライン ===
+    // 4D 頂点定義（正五胞体の正多胞体座標）
+    const r5 = 1 / Math.sqrt(5);
+    this.baseVertices4D = [
+      [ 1,  1,  1, -r5],
+      [ 1, -1, -1, -r5],
+      [-1,  1, -1, -r5],
+      [-1, -1,  1, -r5],
+      [ 0,  0,  0,  4 * r5]
+    ].map(v => {
+      // 原点中心にスケール正規化
+      const len = Math.hypot(...v);
+      return v.map(x => (x / len) * 1.35);
+    });
+
+    // 10本のエッジ定義 (全頂点間の組み合わせ: 5C2 = 10)
+    this.edges = [];
+    for (let i = 0; i < 5; i++) {
+      for (let j = i + 1; j < 5; j++) {
+        this.edges.push([i, j]);
+      }
+    }
+
+    // 4D 回転角
+    this.rotAngles = {
+      xy: 0, xz: 0, xw: 0,
+      yz: 0, yw: 0, zw: 0
+    };
+
+    this.currentVertices3D = [];
+    this.initMeshes();
+  }
+
+  initMeshes() {
+    // 1. エッジ（線香花火の芯となる超高輝度フィラメント線）
+    const edgeGeo = new THREE.BufferGeometry();
+    const positions = new Float32Array(this.edges.length * 2 * 3);
+    const colors = new Float32Array(this.edges.length * 2 * 3);
+
+    edgeGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    edgeGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    // 線香花火の灼熱白芯マテリアル
     this.edgeMaterial = new THREE.LineBasicMaterial({
-      color: 0xffffff,
+      vertexColors: true,
       transparent: true,
       opacity: 0.95,
       blending: THREE.AdditiveBlending,
-      depthWrite: false
+      linewidth: 1.5
     });
-    const edgeGeom = new THREE.BufferGeometry();
-    const positions = new Float32Array(this.edges.length * 2 * 3);
-    edgeGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    this.edgeLines = new THREE.LineSegments(edgeGeom, this.edgeMaterial);
+
+    this.edgeLines = new THREE.LineSegments(edgeGeo, this.edgeMaterial);
     this.group.add(this.edgeLines);
 
-    // === Faces: 半透明パネル ===
-    this.faceMeshes = [];
-    for (let i = 0; i < this.faces.length; i++) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
-      const m = new THREE.MeshBasicMaterial({
-        color: 0xcfefff,
-        transparent: true,
-        opacity: 0.08,
-        side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-      });
-      const mesh = new THREE.Mesh(g, m);
-      this.faceMeshes.push(mesh);
-      this.group.add(mesh);
-    }
+    // 2. 5つの頂点（白熱発光核）
+    const vertexGeo = new THREE.BufferGeometry();
+    const vPositions = new Float32Array(5 * 3);
+    vertexGeo.setAttribute('position', new THREE.BufferAttribute(vPositions, 3));
 
-    // === Vertices: 光の粒 ===
-    const vertGeom = new THREE.BufferGeometry();
-    vertGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(15), 3));
-    const vertMat = new THREE.PointsMaterial({
-      color: 0xffffff,
-      size: 0.045,
+    // 頂点用グローマテリアル
+    const sparkCanvas = this.createVertexSparkTexture();
+    const sparkTex = new THREE.CanvasTexture(sparkCanvas);
+
+    const vertexMat = new THREE.PointsMaterial({
+      size: 0.35,
+      map: sparkTex,
       transparent: true,
-      opacity: 1.0,
       blending: THREE.AdditiveBlending,
-      sizeAttenuation: true,
       depthWrite: false
     });
-    this.vertexPoints = new THREE.Points(vertGeom, vertMat);
+
+    this.vertexPoints = new THREE.Points(vertexGeo, vertexMat);
     this.group.add(this.vertexPoints);
   }
 
-  update(dt) {
-    this.time += dt;
-    const t = this.time;
-
-    // 4D回転角
-    const aXW = t * 0.35;
-    const aYW = t * 0.27;
-    const aZW = t * 0.19;
-    const aXY = t * 0.05;
-
-    // 各頂点を4D回転→3D射影
-    const projected = this.baseVerts.map(v => {
-      const r = rotate4D(v, aXW, aYW, aZW, aXY);
-      return project4Dto3D(r).multiplyScalar(this.scale);
-    });
-
-    // Edges 更新
-    const posAttr = this.edgeLines.geometry.attributes.position;
-    for (let i = 0; i < this.edges.length; i++) {
-      const [a, b] = this.edges[i];
-      const va = projected[a], vb = projected[b];
-      posAttr.setXYZ(i*2,   va.x, va.y, va.z);
-      posAttr.setXYZ(i*2+1, vb.x, vb.y, vb.z);
-    }
-    posAttr.needsUpdate = true;
-
-    // ラインの明滅（線香花火感）
-    this.edgeMaterial.opacity = 0.75 + 0.25 * Math.sin(t * 8.0);
-
-    // Faces 更新＋明滅
-    for (let i = 0; i < this.faces.length; i++) {
-      const [a, b, c] = this.faces[i];
-      const g = this.faceMeshes[i].geometry;
-      const p = g.attributes.position;
-      const va = projected[a], vb = projected[b], vc = projected[c];
-      p.setXYZ(0, va.x, va.y, va.z);
-      p.setXYZ(1, vb.x, vb.y, vb.z);
-      p.setXYZ(2, vc.x, vc.y, vc.z);
-      p.needsUpdate = true;
-      // 個別に位相ずれた明滅
-      const blink = 0.03 + 0.09 * Math.abs(Math.sin(t * 2.0 + i * 0.7));
-      this.faceMeshes[i].material.opacity = blink;
-    }
-
-    // Vertices 更新
-    const vp = this.vertexPoints.geometry.attributes.position;
-    for (let i = 0; i < 5; i++) {
-      vp.setXYZ(i, projected[i].x, projected[i].y, projected[i].z);
-    }
-    vp.needsUpdate = true;
+  createVertexSparkTexture() {
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 64;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 30);
+    g.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    g.addColorStop(0.2, 'rgba(255, 245, 220, 0.85)');
+    g.addColorStop(0.5, 'rgba(100, 220, 255, 0.3)');
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 64, 64);
+    return c;
   }
 
-  setPosition(x, y, z) {
-    this.group.position.set(x, y, z);
+  update(dt) {
+    // 4D空間での滑らかな複合回転速度
+    this.rotAngles.xw += dt * 0.45;
+    this.rotAngles.yw += dt * 0.35;
+    this.rotAngles.zw += dt * 0.25;
+    this.rotAngles.xy += dt * 0.15;
+
+    // 4D 回転行列の適用 & 3D透視射影
+    const cameraDist4D = 2.4;
+    this.currentVertices3D = [];
+
+    const projected = this.baseVertices4D.map(v => {
+      let [x, y, z, w] = v;
+
+      // XW 平面回転
+      let cos = Math.cos(this.rotAngles.xw), sin = Math.sin(this.rotAngles.xw);
+      let x1 = x * cos - w * sin;
+      let w1 = x * sin + w * cos;
+      x = x1; w = w1;
+
+      // YW 平面回転
+      cos = Math.cos(this.rotAngles.yw); sin = Math.sin(this.rotAngles.yw);
+      let y1 = y * cos - w * sin;
+      let w2 = y * sin + w * cos;
+      y = y1; w = w2;
+
+      // ZW 平面回転
+      cos = Math.cos(this.rotAngles.zw); sin = Math.sin(this.rotAngles.zw);
+      let z1 = z * cos - w * sin;
+      let w3 = z * sin + w * cos;
+      z = z1; w = w3;
+
+      // 4D → 3D 透視射影 (Stereographic / Perspective Projection)
+      const scale = cameraDist4D / (cameraDist4D - w);
+      const p3 = new THREE.Vector3(x * scale, y * scale, z * scale);
+      this.currentVertices3D.push({ pos: p3, w: w, scale: scale });
+      return p3;
+    });
+
+    // ジオメトリ頂点位置・カラー更新
+    const edgePosAttr = this.edgeLines.geometry.attributes.position;
+    const edgeColAttr = this.edgeLines.geometry.attributes.color;
+    const vPosAttr = this.vertexPoints.geometry.attributes.position;
+
+    let pIdx = 0;
+    let cIdx = 0;
+
+    for (let k = 0; k < this.edges.length; k++) {
+      const [i, j] = this.edges[k];
+      const vA = projected[i];
+      const vB = projected[j];
+      const wAvg = (this.currentVertices3D[i].w + this.currentVertices3D[j].w) * 0.5;
+
+      edgePosAttr.array[pIdx++] = vA.x;
+      edgePosAttr.array[pIdx++] = vA.y;
+      edgePosAttr.array[pIdx++] = vA.z;
+
+      edgePosAttr.array[pIdx++] = vB.x;
+      edgePosAttr.array[pIdx++] = vB.y;
+      edgePosAttr.array[pIdx++] = vB.z;
+
+      // 4次元深度(w)に応じた明度・色相変調
+      // 手前(w大): 超高輝度白熱金 / 奥(w小): 網膜残像シアンブルー
+      const t = (wAvg + 1.2) / 2.4;
+      const r = THREE.MathUtils.lerp(0.3, 1.0, t);
+      const g = THREE.MathUtils.lerp(0.8, 0.98, t);
+      const b = THREE.MathUtils.lerp(1.0, 0.9, t);
+
+      for (let n = 0; n < 2; n++) {
+        edgeColAttr.array[cIdx++] = r;
+        edgeColAttr.array[cIdx++] = g;
+        edgeColAttr.array[cIdx++] = b;
+      }
+    }
+
+    for (let i = 0; i < 5; i++) {
+      vPosAttr.array[i * 3] = projected[i].x;
+      vPosAttr.array[i * 3 + 1] = projected[i].y;
+      vPosAttr.array[i * 3 + 2] = projected[i].z;
+    }
+
+    edgePosAttr.needsUpdate = true;
+    edgeColAttr.needsUpdate = true;
+    vPosAttr.needsUpdate = true;
+
+    return this.currentVertices3D;
   }
 }

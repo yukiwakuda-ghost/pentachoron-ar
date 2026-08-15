@@ -1,212 +1,162 @@
-// particles.js - 周囲に散る細かい△と正四面体の光の粒
-// メインの正五胞体の周辺で明滅・移動する装飾パーティクル群。
-
 import * as THREE from 'three';
 
 /**
- * TetrahedronCluster - 小さい正四面体をシャープに光らせる粒
+ * 線香花火の松葉散華 & 網膜残像（Afterimage）パーティクル
+ * 
+ * 生理的光学現象の再現：
+ * 1. 弾けた瞬間: 鋭い白金色（#FFFFFF, #FFF0D0）の微細な光芒
+ * 2. 減衰時: エネルギーを失うと同時に、ヒトの網膜の受容体疲労による
+ *    補色の残像（淡いコバルトシアン / インディゴ: #00E5FF, #2B44FF）が一瞬浮かび上がって消える。
  */
-export class TetrahedronCluster {
-  constructor(count = 24) {
-    this.count = count;
-    this.group = new THREE.Group();
-    this.items = [];
+export class SparkleParticles {
+  constructor(maxCount = 900) {
+    this.maxCount = maxCount;
+    this.particles = [];
 
-    const baseGeom = new THREE.TetrahedronGeometry(1.0, 0);
-    // エッジ（線香花火風の鋭い光）
-    const edgeGeom = new THREE.EdgesGeometry(baseGeom);
+    const geo = new THREE.BufferGeometry();
+    this.positions = new Float32Array(maxCount * 3);
+    this.colors = new Float32Array(maxCount * 3);
+    this.sizes = new Float32Array(maxCount);
 
-    for (let i = 0; i < count; i++) {
-      const size = THREE.MathUtils.randFloat(0.015, 0.06);
-      const scaledEdge = edgeGeom.clone();
-      scaledEdge.scale(size, size, size);
+    geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+    geo.setAttribute('size', new THREE.BufferAttribute(this.sizes, 1));
 
-      const mat = new THREE.LineBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.9,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-      });
-      const line = new THREE.LineSegments(scaledEdge, mat);
+    // 高解像度松葉スパークテクスチャ
+    const sparkTex = new THREE.CanvasTexture(this.createSparkCanvas());
 
-      // 大きめの粒には面のちらつきも
-      let face = null;
-      if (size > 0.035) {
-        const fgeom = new THREE.TetrahedronGeometry(size, 0);
-        const fmat = new THREE.MeshBasicMaterial({
-          color: 0xcfefff,
-          transparent: true,
-          opacity: 0.15,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false
-        });
-        face = new THREE.Mesh(fgeom, fmat);
-        line.add(face);
-      }
-
-      const item = {
-        line,
-        face,
-        size,
-        // 球状にランダム配置
-        origin: this._randomInSphere(1.2),
-        target: this._randomInSphere(1.2),
-        transitionTime: 0,
-        transitionDuration: THREE.MathUtils.randFloat(2.0, 5.0),
-        rotSpeed: new THREE.Vector3(
-          THREE.MathUtils.randFloatSpread(1.0),
-          THREE.MathUtils.randFloatSpread(1.0),
-          THREE.MathUtils.randFloatSpread(1.0)
-        ),
-        phase: Math.random() * Math.PI * 2,
-        blinkSpeed: THREE.MathUtils.randFloat(3.0, 9.0),
-        life: Math.random(),
-        lifeSpeed: THREE.MathUtils.randFloat(0.2, 0.6)
-      };
-      line.position.copy(item.origin);
-      this.items.push(item);
-      this.group.add(line);
-    }
-  }
-
-  _randomInSphere(radius) {
-    const u = Math.random();
-    const r = radius * Math.cbrt(u);
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-    return new THREE.Vector3(
-      r * Math.sin(phi) * Math.cos(theta),
-      r * Math.sin(phi) * Math.sin(theta),
-      r * Math.cos(phi)
-    );
-  }
-
-  update(dt) {
-    for (const it of this.items) {
-      // 位置遷移
-      it.transitionTime += dt;
-      const p = Math.min(it.transitionTime / it.transitionDuration, 1.0);
-      // easeInOut
-      const e = p < 0.5 ? 2*p*p : 1 - Math.pow(-2*p+2, 2)/2;
-      it.line.position.lerpVectors(it.origin, it.target, e);
-      if (p >= 1.0) {
-        it.origin.copy(it.target);
-        it.target.copy(this._randomInSphere(1.2));
-        it.transitionTime = 0;
-        it.transitionDuration = THREE.MathUtils.randFloat(2.0, 5.0);
-      }
-
-      // 回転
-      it.line.rotation.x += it.rotSpeed.x * dt;
-      it.line.rotation.y += it.rotSpeed.y * dt;
-      it.line.rotation.z += it.rotSpeed.z * dt;
-
-      // 明滅
-      it.phase += dt * it.blinkSpeed;
-      const flicker = 0.4 + 0.6 * Math.abs(Math.sin(it.phase));
-      // life サイクル（フェード付き）
-      it.life += dt * it.lifeSpeed;
-      if (it.life > 1.0) it.life = 0;
-      const lifeFade = Math.sin(it.life * Math.PI); // 0→1→0
-      it.line.material.opacity = flicker * lifeFade * 0.95;
-      if (it.face) {
-        it.face.material.opacity = flicker * lifeFade * 0.18;
-      }
-    }
-  }
-}
-
-/**
- * TrianglePoints - 極小の△点群（GPUで軽量に）
- * PointsMaterial + カスタムテクスチャで△の形にする。
- */
-export class TrianglePoints {
-  constructor(count = 180) {
-    this.count = count;
-    const positions = new Float32Array(count * 3);
-    const phases = new Float32Array(count);
-    for (let i = 0; i < count; i++) {
-      const r = THREE.MathUtils.randFloat(0.4, 1.6);
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      positions[i*3]   = r * Math.sin(phi) * Math.cos(theta);
-      positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
-      positions[i*3+2] = r * Math.cos(phi);
-      phases[i] = Math.random() * Math.PI * 2;
-    }
-    this.phases = phases;
-    this.basePositions = positions.slice();
-
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-    // △形のCanvasテクスチャ
-    const tex = this._makeTriangleTexture();
-
-    const mat = new THREE.PointsMaterial({
-      color: 0xffffff,
-      size: 0.06,
-      map: tex,
+    this.material = new THREE.PointsMaterial({
+      size: 0.18,
+      map: sparkTex,
+      vertexColors: true,
       transparent: true,
-      alphaTest: 0.01,
       blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      sizeAttenuation: true
+      depthWrite: false
     });
-    this.points = new THREE.Points(geom, mat);
-    this.time = 0;
+
+    this.points = new THREE.Points(geo, this.material);
+
+    // プール初期化
+    for (let i = 0; i < maxCount; i++) {
+      this.particles.push({
+        alive: false,
+        pos: new THREE.Vector3(),
+        vel: new THREE.Vector3(),
+        life: 0,
+        maxLife: 1.0,
+        baseSize: 0.1
+      });
+    }
   }
 
-  _makeTriangleTexture() {
-    const size = 64;
+  createSparkCanvas() {
     const c = document.createElement('canvas');
-    c.width = c.height = size;
+    c.width = 32;
+    c.height = 32;
     const ctx = c.getContext('2d');
-    ctx.clearRect(0, 0, size, size);
-    const cx = size/2, cy = size/2, r = size*0.42;
-    ctx.beginPath();
-    for (let i = 0; i < 3; i++) {
-      const a = -Math.PI/2 + i * (Math.PI*2/3);
-      const x = cx + Math.cos(a) * r;
-      const y = cy + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    // グロー
-    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-    grad.addColorStop(0, 'rgba(255,255,255,1.0)');
-    grad.addColorStop(0.6, 'rgba(220,240,255,0.6)');
-    grad.addColorStop(1.0, 'rgba(180,220,255,0.0)');
-    ctx.fillStyle = grad;
-    ctx.fill();
-    // 縁
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    const t = new THREE.CanvasTexture(c);
-    t.minFilter = THREE.LinearFilter;
-    t.magFilter = THREE.LinearFilter;
-    return t;
+    const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 15);
+    g.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    g.addColorStop(0.3, 'rgba(255, 255, 255, 0.7)');
+    g.addColorStop(0.7, 'rgba(77, 226, 255, 0.25)');
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 32, 32);
+    return c;
   }
 
-  update(dt) {
-    this.time += dt;
-    const pos = this.points.geometry.attributes.position;
-    // ゆらぎ
-    for (let i = 0; i < this.count; i++) {
-      const bx = this.basePositions[i*3];
-      const by = this.basePositions[i*3+1];
-      const bz = this.basePositions[i*3+2];
-      const ph = this.phases[i];
-      const wob = 0.03;
-      pos.array[i*3]   = bx + Math.sin(this.time*1.3 + ph) * wob;
-      pos.array[i*3+1] = by + Math.cos(this.time*1.1 + ph*1.3) * wob;
-      pos.array[i*3+2] = bz + Math.sin(this.time*0.9 + ph*0.7) * wob;
+  spawn(origin, count = 3) {
+    let spawned = 0;
+    for (let i = 0; i < this.maxCount; i++) {
+      const p = this.particles[i];
+      if (!p.alive) {
+        p.alive = true;
+        p.pos.copy(origin.pos);
+        
+        // 線香花火特有の鋭い線状放射（ランダムな方向へ弾け飛ぶ）
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(Math.random() * 2 - 1);
+        const speed = 0.4 + Math.random() * 1.6;
+        
+        p.vel.set(
+          Math.sin(phi) * Math.cos(theta),
+          Math.sin(phi) * Math.sin(theta),
+          Math.cos(phi)
+        ).multiplyScalar(speed);
+
+        p.life = 0;
+        p.maxLife = 0.35 + Math.random() * 0.55; // 0.35〜0.9秒の刹那的な寿命
+        p.baseSize = 0.08 + Math.random() * 0.14;
+
+        spawned++;
+        if (spawned >= count) break;
+      }
     }
-    pos.needsUpdate = true;
-    // 全体の明滅
-    this.points.material.opacity = 0.6 + 0.4 * Math.abs(Math.sin(this.time*4.0));
+  }
+
+  update(dt, vertices3D) {
+    // 頂点から確率的に線香花火の火花を射出
+    if (vertices3D && vertices3D.length > 0) {
+      for (const v of vertices3D) {
+        if (Math.random() < 0.65) {
+          this.spawn(v, 2);
+        }
+      }
+    }
+
+    let activeCount = 0;
+    const posArr = this.points.geometry.attributes.position.array;
+    const colArr = this.points.geometry.attributes.color.array;
+
+    for (let i = 0; i < this.maxCount; i++) {
+      const p = this.particles[i];
+      const i3 = i * 3;
+
+      if (p.alive) {
+        p.life += dt;
+        if (p.life >= p.maxLife) {
+          p.alive = false;
+          posArr[i3] = 9999; // 画面外
+          continue;
+        }
+
+        // 速度減衰（空気抵抗）+ わずかな重力
+        p.vel.multiplyScalar(Math.pow(0.2, dt));
+        p.vel.y -= 0.3 * dt;
+        p.pos.addScaledVector(p.vel, dt);
+
+        posArr[i3] = p.pos.x;
+        posArr[i3 + 1] = p.pos.y;
+        posArr[i3 + 2] = p.pos.z;
+
+        // 生理的色相変化：白熱光 → 補色シアン残像
+        const progress = p.life / p.maxLife; // 0.0 -> 1.0
+
+        let r, g, b;
+        if (progress < 0.35) {
+          // 初期段階: 灼熱の白金色
+          r = 1.0;
+          g = 0.98;
+          b = 0.92;
+        } else {
+          // 減衰・消失段階: 補色アフターイメージ（網膜残像シアン・インディゴ）
+          const fade = (progress - 0.35) / 0.65;
+          const alpha = 1.0 - fade;
+          r = THREE.MathUtils.lerp(1.0, 0.05, fade) * alpha;
+          g = THREE.MathUtils.lerp(0.98, 0.75, fade) * alpha;
+          b = THREE.MathUtils.lerp(0.92, 1.0, fade) * alpha;
+        }
+
+        colArr[i3] = r;
+        colArr[i3 + 1] = g;
+        colArr[i3 + 2] = b;
+
+        activeCount++;
+      } else {
+        posArr[i3] = 9999;
+      }
+    }
+
+    this.points.geometry.attributes.position.needsUpdate = true;
+    this.points.geometry.attributes.color.needsUpdate = true;
   }
 }

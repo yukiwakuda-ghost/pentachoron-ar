@@ -1,141 +1,101 @@
-// recorder.js - カメラ映像 + WebGLキャンバスを合成して15秒動画を出力
-// リアルタイムモード: 両方のフレームを1つのcanvasに毎フレーム描画→MediaRecorder
-// 合成モード: 撮影中は同上、撮影後に追加のポストエフェクト（露光・グロー強化）を掛ける
-
-export class Recorder {
-  constructor(videoEl, threeCanvas, opts = {}) {
-    this.videoEl = videoEl;
-    this.threeCanvas = threeCanvas;
-    this.duration = opts.duration || 15000;
-    this.mode = opts.mode || 'realtime';
-    this.onProgress = opts.onProgress || (() => {});
-    this.onComplete = opts.onComplete || (() => {});
-
-    // 合成用オフスクリーンcanvas
-    this.canvas = document.createElement('canvas');
-    this.ctx = this.canvas.getContext('2d');
-
-    this.recording = false;
-    this.stream = null;
-    this.recorder = null;
+/**
+ * 15秒間 高精細AR合成キャプチャ & iOS写真アプリ対応動画生成
+ */
+export class VideoRecorder {
+  constructor(videoElement, canvasElement) {
+    this.video = videoElement;
+    this.canvas = canvasElement;
+    this.isRecording = false;
+    this.mediaRecorder = null;
     this.chunks = [];
-    this.rafId = null;
-    this.startTime = 0;
+    this.duration = 15; // 15秒
   }
 
-  _resize() {
-    // 出力解像度（縦動画）
-    const w = 720;
-    const h = 1280;
-    this.canvas.width = w;
-    this.canvas.height = h;
-  }
-
-  _drawFrame() {
-    if (!this.recording) return;
-    const { canvas, ctx, videoEl, threeCanvas } = this;
-    const cw = canvas.width, ch = canvas.height;
-
-    // === カメラ映像を cover でフィット ===
-    if (videoEl.readyState >= 2) {
-      const vw = videoEl.videoWidth || cw;
-      const vh = videoEl.videoHeight || ch;
-      const scale = Math.max(cw / vw, ch / vh);
-      const dw = vw * scale;
-      const dh = vh * scale;
-      const dx = (cw - dw) / 2;
-      const dy = (ch - dh) / 2;
-      ctx.drawImage(videoEl, dx, dy, dw, dh);
-    } else {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, cw, ch);
-    }
-
-    // === Three.jsキャンバスを重ねる（加算/通常） ===
-    // three.jsはalpha:trueで背景透過 → 通常合成でOK
-    ctx.drawImage(threeCanvas, 0, 0, cw, ch);
-
-    // 進捗
-    const t = performance.now() - this.startTime;
-    const p = Math.min(t / this.duration, 1.0);
-    this.onProgress(p);
-    if (t >= this.duration) {
-      this.stop();
-      return;
-    }
-    this.rafId = requestAnimationFrame(() => this._drawFrame());
-  }
-
-  start() {
-    this._resize();
-    this.chunks = [];
-    this.recording = true;
-
-    // canvas.captureStream で MediaRecorder に流す
-    const fps = 30;
-    this.stream = this.canvas.captureStream(fps);
-
-    // MediaRecorder mime 選択（iOS Safari 対応）
-    const mimeCandidates = [
+  getSupportedMimeType() {
+    // iOS Safari 写真アプリ互換の MP4 形式を最優先
+    const types = [
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
       'video/mp4;codecs=avc1',
       'video/mp4',
       'video/webm;codecs=vp9',
       'video/webm;codecs=vp8',
       'video/webm'
     ];
-    let mime = '';
-    for (const m of mimeCandidates) {
-      if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) { mime = m; break; }
+    for (const t of types) {
+      if (MediaRecorder.isTypeSupported(t)) {
+        return t;
+      }
     }
-    this.mime = mime || 'video/webm';
-    try {
-      this.recorder = new MediaRecorder(this.stream, { mimeType: this.mime, videoBitsPerSecond: 6_000_000 });
-    } catch (e) {
-      // フォールバック
-      this.recorder = new MediaRecorder(this.stream);
-    }
-    this.recorder.ondataavailable = (ev) => {
-      if (ev.data && ev.data.size > 0) this.chunks.push(ev.data);
-    };
-    this.recorder.onstop = () => this._finalize();
-    this.recorder.start(200);
+    return '';
+  }
 
-    this.startTime = performance.now();
-    this.rafId = requestAnimationFrame(() => this._drawFrame());
+  start(onProgress, onComplete) {
+    if (this.isRecording) return;
+    this.isRecording = true;
+    this.chunks = [];
+
+    // オフスクリーンの合成用キャンバスを作成
+    const compCanvas = document.createElement('canvas');
+    const width = this.canvas.width || 1080;
+    const height = this.canvas.height || 1920;
+    compCanvas.width = width;
+    compCanvas.height = height;
+    const ctx = compCanvas.getContext('2d', { alpha: false });
+
+    // 毎フレームカメラ映像とThree.jsキャンバスを高精度合成
+    let animId;
+    const renderComposite = () => {
+      if (!this.isRecording) return;
+      ctx.drawImage(this.video, 0, 0, width, height);
+      ctx.drawImage(this.canvas, 0, 0, width, height);
+      animId = requestAnimationFrame(renderComposite);
+    };
+    renderComposite();
+
+    // 合成キャンバスから 60fps ストリームを抽出
+    const stream = compCanvas.captureStream(60);
+    const mimeType = this.getSupportedMimeType();
+
+    const options = mimeType ? { mimeType, videoBitsPerSecond: 8000000 } : {};
+    this.mediaRecorder = new MediaRecorder(stream, options);
+
+    this.mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        this.chunks.push(e.data);
+      }
+    };
+
+    this.mediaRecorder.onstop = () => {
+      cancelAnimationFrame(animId);
+      const actualType = mimeType || 'video/mp4';
+      const blob = new Blob(this.chunks, { type: actualType });
+      const url = URL.createObjectURL(blob);
+      if (onComplete) onComplete(blob, url);
+    };
+
+    this.mediaRecorder.start(100);
+
+    // タイマー更新 (15秒)
+    const startTime = performance.now();
+    const interval = setInterval(() => {
+      const elapsed = (performance.now() - startTime) / 1000;
+      if (onProgress) onProgress(Math.min(elapsed, this.duration), this.duration);
+
+      if (elapsed >= this.duration) {
+        clearInterval(interval);
+        this.stop();
+      }
+    }, 100);
+
+    this.timerInterval = interval;
   }
 
   stop() {
-    if (!this.recording) return;
-    this.recording = false;
-    if (this.rafId) cancelAnimationFrame(this.rafId);
-    if (this.recorder && this.recorder.state !== 'inactive') this.recorder.stop();
-    if (this.stream) this.stream.getTracks().forEach(t => t.stop());
-  }
-
-  async _finalize() {
-    const blob = new Blob(this.chunks, { type: this.mime });
-    if (this.mode === 'composite') {
-      // 合成モード: 後処理（今はグロー強化のポストプロセスを模した処理）
-      // ブラウザだけでフレームレベル再エンコードは重いので、
-      // ここではブロブをそのまま返しつつ、UI上で「合成完了」と表示。
-      // 進捗をゆっくり進めて演出。
-      await this._simulateCompositeProgress();
+    if (!this.isRecording) return;
+    this.isRecording = false;
+    if (this.timerInterval) clearInterval(this.timerInterval);
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop();
     }
-    const url = URL.createObjectURL(blob);
-    const ext = (this.mime.includes('mp4')) ? 'mp4' : 'webm';
-    this.onComplete({ blob, url, ext });
-  }
-
-  _simulateCompositeProgress() {
-    return new Promise(resolve => {
-      let p = 0;
-      const step = () => {
-        p += 0.02 + Math.random() * 0.02;
-        if (p >= 1) { this.onProgress(1, 'composite'); resolve(); return; }
-        this.onProgress(p, 'composite');
-        setTimeout(step, 60);
-      };
-      step();
-    });
   }
 }
